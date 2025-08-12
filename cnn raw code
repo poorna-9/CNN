@@ -1,282 +1,6 @@
 import numpy as np
-import math
 from collections import defaultdict
 
-class CNN:
-    def __init__(self):
-        self.loss = 'binary_crossentropy'
-        self.initialmethod = 'he'
-        self.layerstype = []
-        self.activations = []
-        self.inputshape = None
-        self.weights = defaultdict(int)
-        self.bias = defaultdict(int)
-        self.layerscount = 0
-        self.counts = []
-        self.kernals = []
-        self.activationvalues=defaultdict(int)
-        self.pool_sizes = []
-        self.strides = []
-        self.maxpositions=defaultdict(int)
-        self.forwardshapes=defaultdict(int)
-        self.opt = Optimizer()
-    def weightinitializationconv2D(self, n, kernel_size, input_shape):
-        if input_shape is not None:
-            fan_in = input_shape[0] * input_shape[1] * input_shape[-1]
-            fan_out = kernel_size[0] * kernel_size[1] * n
-        else:
-            raise ValueError("input_shape cannot be None")
-
-        if self.initialmethod == 'he':
-            limit = np.sqrt(2 / fan_in)
-        elif self.initialmethod == 'xavier':
-            limit = np.sqrt(6 / (fan_in + fan_out))
-        else:
-            raise ValueError("Unsupported initialization method. Choose 'xavier' or 'he'.")
-
-        shape = (kernel_size[0], kernel_size[1], input_shape[-1], n)
-        weights = np.random.uniform(-limit, limit, size=shape)
-
-        return weights
-
-    def weightinitializationDense(self, n, shape):
-        if self.initialmethod == 'he':
-            limit = np.sqrt(2 / shape[0])
-        elif self.initialmethod == 'xavier':
-            limit = np.sqrt(6 / sum(shape))
-        else:
-            raise ValueError("Unsupported initialization method. Choose 'xavier' or 'he'")
-        return np.random.uniform(-limit, limit, size=shape)
-
-    def biastinitialization(self, typ, n):
-        return np.zeros(n)
-
-    def add(self, typ, n=None, kernel_size=(3, 3), pool_size=(2, 2), stride=(2, 2), activation='relu', input_shape=None):
-       if self.inputshape is None and input_shape is not None:
-        self.inputshape=input_shape
-       self.layerstype.append(typ)
-       self.counts.append(n)
-
-       if typ == 'conv2D':
-        self.weights[self.layerscount] = self.weightinitializationconv2D(n, kernel_size, self.inputshape)
-        self.bias[self.layerscount] = self.biastinitialization(typ, n)
-        self.kernals.append(kernel_size)
-        self.pool_sizes.append(None)
-        self.strides.append(None)
-        self.maxpositions[self.layerscount] = None
-        self.inputshape = (self.inputshape[0] - kernel_size[0] + 1,
-                               self.inputshape[1] - kernel_size[1] + 1, n)
-      elif typ == 'Dense':
-        self.weights[self.layerscount] = self.weightinitializationDense(n, input_shape)
-        self.bias[self.layerscount] = self.biastinitialization(typ, n)
-        self.kernals.append(None)
-        self.pool_sizes.append(None)
-        self.strides.append(None)
-        self.maxpositions[self.layerscount] = None
-        self.inputshape = (n,)
-      elif typ == 'flatten':
-        self.weights[self.layerscount] = None
-        self.bias[self.layerscount] = None
-        self.kernals.append(None)
-        self.pool_sizes.append(None)
-        self.strides.append(None)
-        self.maxpositions[self.layerscount] = None
-        self.inputshape = (np.prod(self.inputshape),)
-      elif typ == 'maxpooling':
-        self.weights[self.layerscount] = None
-        self.bias[self.layerscount] = None
-        self.kernals.append(None)
-        self.pool_sizes.append(pool_size)
-        self.strides.append(stride)
-        self.maxpositions[self.layerscount] = []
-        self.inputshape = ((self.inputshape[0] - pool_size[0]) // stride[0] + 1,
-                               (self.inputshape[1] - pool_size[1]) // stride[1] + 1,
-                               self.inputshape[2])
-      else:
-        raise ValueError("Unsupported layer type. Choose 'conv2D', 'Dense', 'flatten', or 'maxpooling'.")
-
-      self.layerscount += 1
-      self.activations.append(activation)
-
-    def conv2D(self, x, kernel,bias):
-        H,W,C=x.shape
-        kH,kW,C,F=kernel.shape
-        outputshape=(H-kH+1,W-kW+1,F)
-        z=np.zeros(outputshape)
-        for f in range(F):
-          for i in range(outputshape[0]):
-            for j in range(outputshape[1]):
-              z[i,j,f]=np.sum(x[i:i+kH,j:j+kW,:]*kernel[:,:,:,f])
-          if bias is not None:
-            z[:, :, f] += bias[f]
-        return z
-
-    def Dense(self, x,weights,bias):
-        return np.dot(x,weights) + bias
-
-
-    def flatten(self, x):
-        return x.flatten()
-
-    def maxpooling(self, x, poolsize=(2, 2), stride=2,layerindex=None):
-        output_height = (x.shape[0] - poolsize[0]) // stride + 1
-        output_width = (x.shape[1] - poolsize[1]) // stride + 1
-        output = np.zeros((output_height, output_width))
-        maxpositions=[]
-
-        for i in range(output_height):
-            for j in range(output_width):
-                region = x[i * stride: i * stride + poolsize[0], j * stride: j * stride + poolsize[1]]
-                output[i, j] = np.max(region)
-                max_idx = np.argmax(region)
-                max_pos = (max_idx // poolsize[1], max_idx % poolsize[1])
-                global_pos = (i * stride + max_pos[0], j * stride + max_pos[1])
-                maxpositions.append(rowpositions)
-        self.maxpositions[layerindex] = maxpositions
-        return output
-
-    def layertyp(self, typ, x, weights,bias,i):
-        if typ == 'conv2D':
-            return self.conv2D(x, weights,bias)
-        elif typ == 'Dense':
-            return self.Dense(x,weights,bias)
-        elif typ == 'flatten':
-            return self.flatten(x)
-        elif typ == 'maxpooling':
-            return self.maxpooling(x,poolsize=self.poolsize[i],stride=self.strides[i],layerindex=i)
-        else:
-            raise ValueError("Unsupported layer type. Choose 'conv2D', 'Dense', 'flatten', or 'maxpooling'.")
-    def activation(self, x, activation):
-        if activation == 'linear':
-            return x
-        elif activation == 'sigmoid':
-            return 1 / (1 + np.exp(-x))
-        elif activation == 'tanh':
-            return np.tanh(x)
-        elif activation == 'relu':
-            return np.maximum(0, x)
-        elif activation == 'leakyrelu':
-            return np.maximum(0.01 * x, x)
-        elif activation == 'softmax':
-            exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))
-            return exp_x / np.sum(exp_x, axis=1, keepdims=True)
-        else:
-            raise ValueError("Unsupported activation function.")
-
-    def forwardpropagation(self, x):
-        for i in range(self.layerscount):
-            self.forwardshapes[i]=x.shape
-            z = self.layertyp(self.layerstype[i], x, self.weights[i],self.bias[i],i)
-            z = self.activation(z,self.activations[i])
-            x = z
-            self.activationvalues[i+1]=x
-        return x
-    def lossderivative(self,ytrue,ypred):
-      if self.loss == 'binary_crossentropy' or self.loss == 'categorical_crossentropy':
-        return ypred-ytrue
-      elif self.loss == 'mean_squared_error':
-        return 2*(ypred-ytrue)
-      elif self.loss == 'mean_absolute_error':
-        return np.sign(ypred-ytrue)
-      else:
-        raise ValueError("Unsupported loss function. Choose 'binary_crossentropy', 'categorical_crossentropy', or 'mean_squared_error'.")
-    def activationderivative(self, x, activation):
-        if activation == 'linear':
-            return np.ones_like(x)
-        elif activation == 'sigmoid':
-            sig = self.activation(x, 'sigmoid')
-            return sig * (1 - sig)
-        elif activation == 'tanh':
-            return 1 - np.tanh(x) ** 2
-        elif activation == 'relu':
-            return np.where(x > 0, 1, 0)
-        elif activation == 'leakyrelu':
-            return np.where(x > 0, 1, 0.01)
-        else:
-            raise ValueError("Unsupported activation function.")
-
-
-    def conv2Dweightgrad(self,X,delta,kernel_size):
-      Hk,Wk=kernel_size
-      c_in=X.shape[-1]
-      c_out=delta.shape[-1]
-      dw=np.zeros((Hk,Wk,c_in,c_out))
-      for c_out in range(C_out):
-        for c_in in range(C_in):
-            for i in range(H_k):
-                for j in range(W_k):
-                    dW[i, j, c_in, c_out] = np.sum(X[i:i+delta.shape[0], j:j+delta.shape[1], c_in] * delta[:, :, c_out])
-
-      return dW
-
-
-    def con2Dbiasgrad(self,delta):
-      return np.sum(delta,axis=(0,1))
-
-    def conv2Dbackprop(self,delta,kernel):
-     kH,kW,cin,cout=kernel.shape
-     Hout,Wout,Cout=delta.shape
-     Hin=Hout+kH-1
-     Win=Wout+kW-1
-     newdelta=np.zeros((Hin,Win,Cin))
-     flippedkernel=np.flip(kernel,axis=(0,1))
-     for cin in range(cin):
-      for cout in range(cout):
-        newdelta[:,:,cin]+=self.fullconvolution(delta[:,:,cout],flippedkernel[:,:,cin,cout])
-     return newdelta
-
-
-    def fullconvolution(self,delta,kernel):
-      Hout,Wout=delta.shape
-      kH,kW=kernel.shape
-      H_in=Hout+kH-1
-      W_in=Wout+kW-1
-      newdelta=np.zeros((H_in,W_in))
-      for i in range(Hout):
-        for j in range(Wout):
-          newdelta[i:i+kH,j:j+kW]+=delta[i,j]*kernel
-      return newdelta
-
-
-
-    def backpropagation(self,x,y,z,learning_rate,optimizertype='adam'):
-      delta = self.lossderivative(y,z)
-      for j in range(self.layerscount-1,-1,-1):
-        if self.layerstype[j] == 'Dense':
-           delta *= self.activationderivative(self.activationvalues[j + 1], self.activations[j])
-           dw = np.dot(self.activationvalues[j].T, delta)
-           db = np.sum(delta, axis=0)
-           self.weights[j], self.bias[j] = self.optimizer.optimizer(
-                optimizer_type, j, self.weights[j], dw, self.bias[j], db, learning_rate
-            )
-           delta = np.dot(delta, self.weights[j].T)
-
-        elif self.layerstype[j] == 'flatten':
-          delta = delta.reshape(self.forwardshapes[j])
-
-        elif self.layerstype[j] == 'maxpooling':
-          grad=np.zeros(self.forwardshapes[j]).flatten()
-          deltaflat=delta.flatten()
-          for i,pos in enumerate(self.maxpositions[j]):
-            grad[pos]+= delta[i]
-          delta=grad.reshape(self.forwardshapes[j])
-
-        elif self.layerstype[j] == 'conv2D':
-          delta *= self.activationderivative(self.activationvalues[j], self.activations[j])
-          dw=self.conv2Dweightgrad(x,delta,self.kernals[j])
-          db=self.con2Dbiasgrad(delta)
-          self.weights[j], self.bias[j] = self.optimizer.optimizer(
-                optimizer_type, j, self.weights[j], dw, self.bias[j], db, learning_rate
-            )
-          delta=self.conv2D(delta,self.weights[j].T,self.bias[j])
-    def fit(self, x, y, epochs, learning_rate):
-        for epoch in range(epochs):
-            z = self.forwardpropagation(x)
-            self.backpropagation(x, y, z, learning_rate)
-
-
-    def predict(self,x):
-      return self.forwardpropagation(x)
 class Optimizer:
     def __init__(self):
         self.m_w = {}
@@ -326,13 +50,279 @@ class Optimizer:
             b -= self.v_b[layer]
         else:
             raise ValueError("Unsupported optimizer function.")
+
         return w, b
 
 
+class CNN:
+    def __init__(self):
+        self.loss = 'binary_crossentropy'
+        self.initialmethod = 'he'
+        self.layerstype = []
+        self.activations = []
+        self.inputshape = None
+        self.weights = defaultdict(int)
+        self.bias = defaultdict(int)
+        self.layerscount = 0
+        self.counts = []
+        self.kernels = []
+        self.activationvalues = defaultdict(int)
+        self.pool_sizes = []
+        self.strides = []
+        self.maxpositions = defaultdict(int)
+        self.forwardshapes = defaultdict(int)
+        self.opt = Optimizer()
+    def weightinitializationconv2D(self, n, kernel_size, input_shape):
+        if input_shape is None:
+            raise ValueError("input_shape cannot be None")
 
+        fan_in = input_shape[0] * input_shape[1] * input_shape[-1]
+        fan_out = kernel_size[0] * kernel_size[1] * n
 
+        if self.initialmethod == 'he':
+            limit = np.sqrt(2 / fan_in)
+        elif self.initialmethod == 'xavier':
+            limit = np.sqrt(6 / (fan_in + fan_out))
+        else:
+            raise ValueError("Unsupported initialization method.")
 
+        shape = (kernel_size[0], kernel_size[1], input_shape[-1], n)
+        return np.random.uniform(-limit, limit, size=shape)
 
+    def weightinitializationDense(self, n, shape):
+        if self.initialmethod == 'he':
+            limit = np.sqrt(2 / shape[0])
+        elif self.initialmethod == 'xavier':
+            limit = np.sqrt(6 / sum(shape))
+        else:
+            raise ValueError("Unsupported initialization method.")
+        return np.random.uniform(-limit, limit, size=shape)
 
+    def biastinitialization(self, n):
+        return np.zeros(n)
+    def add(self, typ, n=None, kernel_size=(3, 3), pool_size=(2, 2), stride=(2, 2), activation='relu', input_shape=None):
+        if self.inputshape is None and input_shape is not None:
+            self.inputshape = input_shape
 
+        self.layerstype.append(typ)
+        self.counts.append(n)
 
+        if typ == 'conv2D':
+            self.weights[self.layerscount] = self.weightinitializationconv2D(n, kernel_size, self.inputshape)
+            self.bias[self.layerscount] = self.biastinitialization(n)
+            self.kernels.append(kernel_size)
+            self.pool_sizes.append(None)
+            self.strides.append(None)
+            self.maxpositions[self.layerscount] = None
+            self.inputshape = (self.inputshape[0] - kernel_size[0] + 1,
+                               self.inputshape[1] - kernel_size[1] + 1, n)
+
+        elif typ == 'Dense':
+            self.weights[self.layerscount] = self.weightinitializationDense(n, (self.inputshape[0], n))
+            self.bias[self.layerscount] = self.biastinitialization(n)
+            self.kernels.append(None)
+            self.pool_sizes.append(None)
+            self.strides.append(None)
+            self.maxpositions[self.layerscount] = None
+            self.inputshape = (n,)
+
+        elif typ == 'flatten':
+            self.weights[self.layerscount] = None
+            self.bias[self.layerscount] = None
+            self.kernels.append(None)
+            self.pool_sizes.append(None)
+            self.strides.append(None)
+            self.maxpositions[self.layerscount] = None
+            self.inputshape = (np.prod(self.inputshape),)
+
+        elif typ == 'maxpooling':
+            self.weights[self.layerscount] = None
+            self.bias[self.layerscount] = None
+            self.kernels.append(None)
+            self.pool_sizes.append(pool_size)
+            self.strides.append(stride)
+            self.maxpositions[self.layerscount] = []
+            self.inputshape = ((self.inputshape[0] - pool_size[0]) // stride[0] + 1,
+                               (self.inputshape[1] - pool_size[1]) // stride[1] + 1,
+                               self.inputshape[2])
+
+        else:
+            raise ValueError("Unsupported layer type.")
+
+        self.layerscount += 1
+        self.activations.append(activation)
+    def conv2D(self, x, kernel, bias):
+        H, W, C = x.shape
+        kH, kW, Cin, F = kernel.shape
+        outputshape = (H - kH + 1, W - kW + 1, F)
+        z = np.zeros(outputshape)
+
+        for f in range(F):
+            for i in range(outputshape[0]):
+                for j in range(outputshape[1]):
+                    z[i, j, f] = np.sum(x[i:i+kH, j:j+kW, :] * kernel[:, :, :, f])
+            if bias is not None:
+                z[:, :, f] += bias[f]
+        return z
+
+    def Dense(self, x, weights, bias):
+        return np.dot(x, weights) + bias
+
+    def flatten(self, x):
+        return x.flatten()
+
+    def maxpooling(self, x, poolsize=(2, 2), stride=2, layerindex=None):
+        output_height = (x.shape[0] - poolsize[0]) // stride + 1
+        output_width = (x.shape[1] - poolsize[1]) // stride + 1
+        output = np.zeros((output_height, output_width))
+        maxpositions = []
+
+        for i in range(output_height):
+            for j in range(output_width):
+                region = x[i * stride: i * stride + poolsize[0], j * stride: j * stride + poolsize[1]]
+                output[i, j] = np.max(region)
+                max_idx = np.argmax(region)
+                max_pos = (max_idx // poolsize[1], max_idx % poolsize[1])
+                global_pos = (i * stride + max_pos[0], j * stride + max_pos[1])
+                maxpositions.append(global_pos)
+
+        self.maxpositions[layerindex] = maxpositions
+        return output
+
+    def layertyp(self, typ, x, weights, bias, i):
+        if typ == 'conv2D':
+            return self.conv2D(x, weights, bias)
+        elif typ == 'Dense':
+            return self.Dense(x, weights, bias)
+        elif typ == 'flatten':
+            return self.flatten(x)
+        elif typ == 'maxpooling':
+            return self.maxpooling(x, poolsize=self.pool_sizes[i], stride=self.strides[i][0], layerindex=i)
+        else:
+            raise ValueError("Unsupported layer type.")
+
+    def activation(self, x, activation):
+        if activation == 'linear':
+            return x
+        elif activation == 'sigmoid':
+            return 1 / (1 + np.exp(-x))
+        elif activation == 'tanh':
+            return np.tanh(x)
+        elif activation == 'relu':
+            return np.maximum(0, x)
+        elif activation == 'leakyrelu':
+            return np.maximum(0.01 * x, x)
+        elif activation == 'softmax':
+            exp_x = np.exp(x - np.max(x))
+            return exp_x / np.sum(exp_x)
+        else:
+            raise ValueError("Unsupported activation function.")
+
+    def forwardpropagation(self, x):
+        for i in range(self.layerscount):
+            self.forwardshapes[i] = x.shape
+            z = self.layertyp(self.layerstype[i], x, self.weights[i], self.bias[i], i)
+            z = self.activation(z, self.activations[i])
+            x = z
+            self.activationvalues[i + 1] = x
+        return x
+
+    def lossderivative(self, ytrue, ypred):
+        if self.loss in ['binary_crossentropy', 'categorical_crossentropy']:
+            return ypred - ytrue
+        elif self.loss == 'mean_squared_error':
+            return 2 * (ypred - ytrue)
+        elif self.loss == 'mean_absolute_error':
+            return np.sign(ypred - ytrue)
+        else:
+            raise ValueError("Unsupported loss function.")
+
+    def activationderivative(self, x, activation):
+        if activation == 'linear':
+            return np.ones_like(x)
+        elif activation == 'sigmoid':
+            sig = self.activation(x, 'sigmoid')
+            return sig * (1 - sig)
+        elif activation == 'tanh':
+            return 1 - np.tanh(x) ** 2
+        elif activation == 'relu':
+            return np.where(x > 0, 1, 0)
+        elif activation == 'leakyrelu':
+            return np.where(x > 0, 1, 0.01)
+        else:
+            raise ValueError("Unsupported activation function.")
+
+    def conv2Dweightgrad(self, X, delta, kernel_size):
+        H_k, W_k = kernel_size
+        C_in = X.shape[-1]
+        C_out = delta.shape[-1]
+        dW = np.zeros((H_k, W_k, C_in, C_out))
+        for cout in range(C_out):
+            for cin in range(C_in):
+                for i in range(H_k):
+                    for j in range(W_k):
+                        dW[i, j, cin, cout] = np.sum(X[i:i+delta.shape[0], j:j+delta.shape[1], cin] * delta[:, :, cout])
+        return dW
+
+    def con2Dbiasgrad(self, delta):
+        return np.sum(delta, axis=(0, 1))
+
+    def fullconvolution(self, delta, kernel):
+        Hout, Wout = delta.shape
+        kH, kW = kernel.shape
+        H_in = Hout + kH - 1
+        W_in = Wout + kW - 1
+        newdelta = np.zeros((H_in, W_in))
+        for i in range(Hout):
+            for j in range(Wout):
+                newdelta[i:i+kH, j:j+kW] += delta[i, j] * kernel
+        return newdelta
+
+    def conv2Dbackprop(self, delta, kernel):
+        kH, kW, Cin, Cout = kernel.shape
+        Hout, Wout, _ = delta.shape
+        Hin = Hout + kH - 1
+        Win = Wout + kW - 1
+        newdelta = np.zeros((Hin, Win, Cin))
+        flippedkernel = np.flip(kernel, axis=(0, 1))
+        for cin in range(Cin):
+            for cout in range(Cout):
+                newdelta[:, :, cin] += self.fullconvolution(delta[:, :, cout], flippedkernel[:, :, cin, cout])
+        return newdelta
+
+    def backpropagation(self, x, y, z, learning_rate, optimizer_type='adam'):
+        delta = self.lossderivative(y, z)
+        for j in range(self.layerscount - 1, -1, -1):
+            if self.layerstype[j] == 'Dense':
+                delta *= self.activationderivative(self.activationvalues[j + 1], self.activations[j])
+                dw = np.outer(self.activationvalues[j], delta)
+                db = np.sum(delta, axis=0)
+                self.weights[j], self.bias[j] = self.opt.optimizer(
+                    optimizer_type, j, self.weights[j], dw, self.bias[j], db, learning_rate
+                )
+                delta = np.dot(delta, self.weights[j].T)
+
+            elif self.layerstype[j] == 'flatten':
+                delta = delta.reshape(self.forwardshapes[j])
+
+            elif self.layerstype[j] == 'maxpooling':
+                grad = np.zeros(self.forwardshapes[j])
+                for idx, pos in enumerate(self.maxpositions[j]):
+                    grad[pos] = delta.flatten()[idx]
+                delta = grad
+
+            elif self.layerstype[j] == 'conv2D':
+                delta *= self.activationderivative(self.activationvalues[j], self.activations[j])
+                dw = self.conv2Dweightgrad(self.activationvalues[j], delta, self.kernels[j])
+                db = self.con2Dbiasgrad(delta)
+                self.weights[j], self.bias[j] = self.opt.optimizer(
+                    optimizer_type, j, self.weights[j], dw, self.bias[j], db, learning_rate
+                )
+                delta = self.conv2Dbackprop(delta, self.weights[j])
+    def fit(self, x, y, epochs, learning_rate, optimizer_type='adam'):
+        for epoch in range(epochs):
+            z = self.forwardpropagation(x)
+            self.backpropagation(x, y, z, learning_rate, optimizer_type)
+
+    def predict(self, x):
+        return self.forwardpropagation(x)
